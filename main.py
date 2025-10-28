@@ -1,5 +1,6 @@
 import pandas as pd
 import openpyxl
+from openpyxl.styles import PatternFill
 from datetime import datetime
 
 print("=" * 60)
@@ -12,15 +13,15 @@ def clean_column_name(col):
         return ''
     return str(col).strip().replace('\xa0', ' ')
 
-# --- Зчитування процентівки з 7-го рядка (header=6) ---
-print("\n1. Зчитування процентівки...")
+# --- Зчитування процентівки ---
+print("\n1. Зчитування та аналіз процентівки...")
 procentivka = pd.read_excel('Процентівка.xlsx', header=6)
 procentivka.columns = [clean_column_name(col) for col in procentivka.columns]
 
 # Знаходимо колонку з прізвищами
 name_col = None
 for col in procentivka.columns:
-    if isinstance(col, str) and ('прізвище' in col.lower() or 'ініціали' in col.lower()):
+    if isinstance(col, str) and ('прізвище' in col.lower() and 'ініціали' in col.lower()):
         name_col = col
         break
 
@@ -28,33 +29,31 @@ if name_col is None:
     raise ValueError("❌ Не знайдено колонку з прізвищами та ініціалами у процентівці")
 
 print(f"✓ Знайдено колонку з прізвищами: '{name_col}'")
-print(f"  Кількість записів у процентівці: {len(procentivka)}")
 
-# Визначаємо колонки для переносу
-required_cols = {
-    'Дата з': None,
-    'Дата по': None,
-    'Тарифний розряд': None,
-    'розмір премії у відсотках (Р-16 від 10.02.23)': None
-}
+# Групуємо дублікати за прізвищем
+procentivka_duplicates = {}
+for idx, row in procentivka.iterrows():
+    name = row.get(name_col)
+    if pd.notna(name) and str(name).strip():
+        name_clean = str(name).strip()
+        if name_clean not in procentivka_duplicates:
+            procentivka_duplicates[name_clean] = []
+        procentivka_duplicates[name_clean].append((idx, row.to_dict()))
 
-for col in procentivka.columns:
-    col_clean = col.strip().lower()
-    if 'дата з' in col_clean:
-        required_cols['Дата з'] = col
-    elif 'дата по' in col_clean:
-        required_cols['Дата по'] = col
-    elif 'тарифний розряд' in col_clean:
-        required_cols['Тарифний розряд'] = col
-    elif 'розмір премії' in col_clean and 'р-16' in col_clean:
-        required_cols['розмір премії у відсотках (Р-16 від 10.02.23)'] = col
+# Знаходимо дублікати
+duplicates_list = {name: entries for name, entries in procentivka_duplicates.items() if len(entries) > 1}
+print(f"  📊 Аналіз процентівки:")
+print(f"     - Усього записів: {len(procentivka)}")
+print(f"     - Унікальних прізвищ: {len(procentivka_duplicates)}")
+print(f"     - Дублікатів: {len(duplicates_list)}")
 
-print("\n✓ Колонки для переносу:")
-for key, value in required_cols.items():
-    print(f"  - {key}: {value if value else 'НЕ ЗНАЙДЕНО'}")
+if duplicates_list:
+    print(f"\n  ⚠ Дублікати у процентівці:")
+    for name, entries in list(duplicates_list.items())[:5]:
+        print(f"     - {name}: {len(entries)} записів")
 
-# --- Зчитування відомості з листа "ПЕРЕНЕСЕННЯ ДАНИХ" ---
-print("\n2. Зчитування відомості...")
+# --- Зчитування відомості ---
+print("\n2. Зчитування та аналіз відомості...")
 vidomist = pd.read_excel('Відомість.xlsm', sheet_name='ПЕРЕНЕСЕННЯ ДАНИХ', header=6)
 vidomist.columns = [clean_column_name(col) for col in vidomist.columns]
 
@@ -69,232 +68,140 @@ if vidomist_name_col is None:
     raise ValueError("❌ Не знайдено колонку з прізвищами та ініціалами у відомості")
 
 print(f"✓ Знайдено колонку з прізвищами: '{vidomist_name_col}'")
-print(f"  Кількість записів у відомості: {len(vidomist)}")
 
-# Створюємо нові колонки у відомості якщо їх немає
-for col_name in required_cols.values():
-    if col_name and col_name not in vidomist.columns:
-        vidomist[col_name] = None
+# Групуємо дублікати у відомості
+vidomist_duplicates = {}
+for idx, row in vidomist.iterrows():
+    name = row.get(vidomist_name_col)
+    if pd.notna(name) and str(name).strip():
+        name_clean = str(name).strip()
+        if name_clean not in vidomist_duplicates:
+            vidomist_duplicates[name_clean] = []
+        vidomist_duplicates[name_clean].append((idx, row.to_dict()))
 
-# Створюємо копію для оновлення
-vidomist_updated = vidomist.copy()
+print(f"  📊 Аналіз відомості:")
+print(f"     - Усього записів: {len(vidomist)}")
+print(f"     - Унікальних прізвищ: {len(vidomist_duplicates)}")
 
-# --- Обробка даних ---
-print("\n3. Обробка даних...")
+# --- Обробка та об'єднання даних ---
+print("\n3. Обробка та об'єднання даних...")
 
-# Групуємо дані з процентівки за прізвищами (для виявлення дублікатів)
-procentivka_by_name = {}
-for idx, row in procentivka.iterrows():
-    name = row.get(name_col)
-    if pd.isna(name) or str(name).strip() == '':
-        continue
-    
-    name_clean = str(name).strip()
-    if name_clean not in procentivka_by_name:
-        procentivka_by_name[name_clean] = []
-    procentivka_by_name[name_clean].append((idx, row))
-
-# Виявляємо дублікати
-duplicates_in_procentivka = {name: rows for name, rows in procentivka_by_name.items() if len(rows) > 1}
-if duplicates_in_procentivka:
-    print(f"  ⚠ Виявлено дублікати у процентівці ({len(duplicates_in_procentivka)}):")
-    for name, rows in list(duplicates_in_procentivka.items())[:5]:
-        print(f"    - {name}: {len(rows)} дублікатів")
-
-rows_to_add = []  # Дублікати для додавання у відомість
-missing_records = []  # Записи яких немає у відомості
+result_rows = []
+missing_records = []
 updated_count = 0
-added_duplicates_count = 0
+duplicates_added = 0
 
-# Для записів з невідповідностями
-mismatch_records = []
-real_mismatches = []
+# Знаходимо відсутні у відомості
+vidomist_names_set = set(vidomist_duplicates.keys())
+procentivka_names_set = set(procentivka_duplicates.keys())
 
-# Обробка кожного унікального імені
-for name, rows in procentivka_by_name.items():
-    matches = vidomist_updated[vidomist_updated[vidomist_name_col] == name]
+missing_in_vidomist = []
+for name in procentivka_names_set:
+    if name not in vidomist_names_set:
+        missing_in_vidomist.append(procentivka_duplicates[name][0][1])  # Перший запис
 
-    if not matches.empty:
-        # Отримуємо дані з процентівки
-        idx, row = rows[0]
+print(f"  - Відсутніх у відомості: {len(missing_in_vidomist)}")
+
+# Обробляємо кожне прізвище з відомості
+for name, entries in vidomist_duplicates.items():
+    if name in procentivka_names_set:
+        # Є у процентівці - беремо дані звідти
+        procentivka_entry = procentivka_duplicates[name][0][1]
         
-        # Оновлюємо дані у всіх існуючих збігах
-        for match_idx in matches.index:
-            # Перевіряємо розбіжності даних
-            has_mismatch = False
-            differences = []
+        for idx, vidomist_entry in entries:
+            # Об'єднуємо дані
+            combined = vidomist_entry.copy()
             
-            # Порівнюємо кожну колонку
-            for col_name, orig_col in required_cols.items():
-                if orig_col:
-                    procentivka_value = row.get(orig_col)
-                    vidomist_value = vidomist_updated.at[match_idx, orig_col] if orig_col in vidomist_updated.columns else None
-                    
-                    # Нормалізуємо значення для порівняння
-                    procentivka_str = str(procentivka_value).strip() if pd.notna(procentivka_value) else ''
-                    vidomist_str = str(vidomist_value).strip() if pd.notna(vidomist_value) else ''
-                    
-                    # Порівнюємо тільки якщо обидва значення не порожні
-                    if procentivka_str and vidomist_str:
-                        if procentivka_str != vidomist_str:
-                            has_mismatch = True
-                            differences.append(f"{col_name}: '{vidomist_str}' ≠ '{procentivka_str}'")
-                    elif (procentivka_str and not vidomist_str) or (not procentivka_str and vidomist_str):
-                        has_mismatch = True
-                        differences.append(f"{col_name}: порожнє значення ≠ '{procentivka_str if procentivka_str else vidomist_str}'")
+            # Додаємо дані з процентівки
+            for col_name in ['Посада', 'Військове звання', 'Дата з', 'Дата по', 'Тарифний розряд', 'розмір премії у відсотках (Р-16 від 10.02.23)']:
+                if col_name in procentivka_entry:
+                    combined[col_name] = procentivka_entry[col_name]
             
-            # Якщо є невідповідності, зберігаємо детальну інформацію
-            if has_mismatch:
-                mismatch_info = {
-                    vidomist_name_col: name,
-                    'Посада (відомість)': vidomist_updated.at[match_idx, 'Посада'] if 'Посада' in vidomist_updated.columns else '',
-                    'Посада (процентівка)': row.get('Посада', ''),
-                    'Військове звання (відомість)': vidomist_updated.at[match_idx, 'Військове звання'] if 'Військове звання' in vidomist_updated.columns else '',
-                    'Військове звання (процентівка)': row.get('Військове звання', ''),
-                    'Розбіжності': ' | '.join(differences)
-                }
-                
-                # Додаємо конкретні колонки з розбіжностями
-                for col_name, orig_col in required_cols.items():
-                    if orig_col:
-                        procentivka_value = row.get(orig_col)
-                        vidomist_value = vidomist_updated.at[match_idx, orig_col] if orig_col in vidomist_updated.columns else None
-                        mismatch_info[f'{col_name} (відомість)'] = vidomist_value if pd.notna(vidomist_value) else ''
-                        mismatch_info[f'{col_name} (процентівка)'] = procentivka_value if pd.notna(procentivka_value) else ''
-                
-                mismatch_records.append(mismatch_info)
-                print(f"  ⚠ РОЗБІЖНІСТЬ: '{name}' - {len(differences)} відмінностей")
-                for diff in differences[:2]:  # Показуємо перші 2 розбіжності
-                    print(f"     • {diff}")
-            
-            # Оновлюємо дані з процентівки
-            for col_name, orig_col in required_cols.items():
-                if orig_col and not pd.isna(row.get(orig_col)):
-                    vidomist_updated.at[match_idx, orig_col] = row.get(orig_col)
+            combined['is_duplicate'] = False
+            result_rows.append(combined)
             updated_count += 1
-            
-            # Якщо є додаткові записи у процентівці, додаємо їх як нові рядки ПІД поточним
-            if len(rows) > 1:
-                for extra_idx, extra_row in rows[1:]:
-                    new_row = vidomist_updated.loc[match_idx].copy()
-                    for col_name, orig_col in required_cols.items():
-                        if orig_col and not pd.isna(extra_row.get(orig_col)):
-                            new_row[orig_col] = extra_row.get(orig_col)
-                    # Зберігаємо індекс для вставки під поточний рядок
-                    rows_to_add.append((match_idx, new_row))
-                    added_duplicates_count += 1
+        
+        # Додаємо дублікати з процентівки
+        if len(procentivka_duplicates[name]) > 1:
+            for dup_idx, dup_entry in procentivka_duplicates[name][1:]:
+                new_row = entries[0][1].copy()  # Базовий рядок з відомості
+                
+                # Додаємо дані дубліката з процентівки
+                for col_name in ['Посада', 'Військове звання', 'Дата з', 'Дата по', 'Тарифний розряд', 'розмір премії у відсотках (Р-16 від 10.02.23)']:
+                    if col_name in dup_entry:
+                        new_row[col_name] = dup_entry[col_name]
+                
+                new_row['is_duplicate'] = True
+                result_rows.append(new_row)
+                duplicates_added += 1
     else:
-        # Запис відсутній у відомості - додаємо до відомості з міткою
-        print(f"  ⚠ ПРОБЛЕМА: '{name}' є у процентівці, але відсутній у відомості! Додаємо...")
-        for idx, row in rows:
-            missing_record = {
-                vidomist_name_col: name,
-                'Посада': row.get('Посада', ''),
-                'Військове звання': row.get('Військове звання', ''),
-                '_is_missing': True  # Мітка для виділення
-            }
-            # Додаємо колонки з процентівки
-            for col_name, orig_col in required_cols.items():
-                if orig_col:
-                    missing_record[col_name] = row.get(orig_col)
-                    missing_record[f'{col_name}_SOURCE'] = 'ПРОЦЕНТІВКА (ВІДСУТНІЙ)'
-            
-            # Додаємо до відомості як новий рядок
-            vidomist_updated = pd.concat([vidomist_updated, pd.DataFrame([missing_record])], ignore_index=True)
-            missing_records.append(missing_record)
+        # Немає у процентівці - додаємо як є
+        for idx, vidomist_entry in entries:
+            vidomist_entry['is_duplicate'] = False
+            result_rows.append(vidomist_entry)
 
-# Додаємо дублікати до відомості (вставляємо під відповідні записи)
-if rows_to_add:
-    print(f"  → Додаємо {len(rows_to_add)} дублікатів під відповідні записи...")
-    
-    # Сортуємо за індексом (від більшого до меншого), щоб не зсувати індекси
-    rows_to_add_sorted = sorted(rows_to_add, key=lambda x: x[0], reverse=True)
-    
-    # Додаємо рядки по одному під відповідні індекси
-    for match_idx, new_row in rows_to_add_sorted:
-        # Знаходимо позицію в vidomist_updated для match_idx
-        vidomist_idx = vidomist_updated.index.get_loc(match_idx)
-        # Додаємо новий рядок після vidomist_idx
-        vidomist_updated = pd.concat([
-            vidomist_updated.iloc[:vidomist_idx + 1],
-            pd.DataFrame([new_row]),
-            vidomist_updated.iloc[vidomist_idx + 1:]
-        ]).reset_index(drop=True)
+# Додаємо відсутні записи
+for missing_entry in missing_in_vidomist:
+    missing_entry['is_duplicate'] = False
+    result_rows.append(missing_entry)
 
-# Знаходимо записи які є у відомості, але відсутні у процентівці
-print("\n5. Перевірка відсутніх записів...")
-vidomist_names = set(vidomist[vidomist_name_col].dropna().astype(str).str.strip())
-procentivka_names = set([name for name in procentivka_by_name.keys()])
+# Створюємо DataFrame
+result_df = pd.DataFrame(result_rows)
 
-missing_in_procentivka = []
-for name in vidomist_names:
-    if name not in procentivka_names and name != '' and name != 'nan':
-        print(f"  ⚠ ПРОБЛЕМА: '{name}' є у відомості, але відсутній у процентівці!")
-        # Знаходимо всі рядки з цим ім'ям у відомості
-        matching_rows = vidomist[vidomist[vidomist_name_col] == name]
-        for idx, row in matching_rows.iterrows():
-            missing_in_procentivka.append(row.to_dict())
+# --- Збереження з червоним виділенням ---
+print("\n4. Збереження результатів...")
 
-# Підсумки перевірок
-print(f"\n📊 РЕЗУЛЬТАТИ ПЕРЕВІРКИ:")
-print(f"  - Значень у процентівці: {len(procentivka_by_name)}")
-print(f"  - Значень у відомості: {len(vidomist_names)}")
-print(f"  - Відсутні у відомості: {len(missing_records)}")
-print(f"  - Відсутні у процентівці: {len(missing_in_procentivka)}")
-
-# --- Збереження результатів ---
-print("\n6. Збереження результатів...")
-
-# Зберігаємо оновлену відомість з унікальною назвою
-from datetime import datetime
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 output_file = f'Відомість_оновлена_{timestamp}.xlsx'
 print(f"  → Зберігаємо: {output_file}")
 
-# Зберігаємо оновлену відомість
+# Зберігаємо Excel
 with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-    vidomist_updated.to_excel(writer, sheet_name='ПЕРЕНЕСЕННЯ ДАНИХ', index=False, startrow=6, header=False)
+    result_df.to_excel(writer, sheet_name='Результат', index=False)
 
-print(f"✓ Файл збережено: {output_file}")
+# Застосовуємо червоне виділення для дублікатів
+wb = openpyxl.load_workbook(output_file)
+ws = wb['Результат']
 
-# Створюємо окремий файл з розбіжностями (тільки справжні розбіжності, не просто порожні значення)
-real_mismatches = []
-for mismatch in mismatch_records:
-    differences = mismatch.get('Розбіжності', '')
-    # Перевіряємо чи є реальні розбіжності (не просто порожні значення)
-    if '≠' in differences and not all('порожнє значення' in d for d in differences.split('|')):
-        real_mismatches.append(mismatch)
+red_fill = PatternFill(start_color="FFFF0000", end_color="FFFF0000", fill_type="solid")
 
-if real_mismatches:
-    mismatch_df = pd.DataFrame(real_mismatches)
-    mismatch_file = 'Розбіжності_за_прізвищем.xlsx'
-    print(f"\n  → Створюємо файл з розбіжностями: {mismatch_file}")
-    print(f"    Кількість справжніх розбіжностей: {len(real_mismatches)}")
-    mismatch_df.to_excel(mismatch_file, index=False)
-    print(f"✓ Файл збережено: {mismatch_file}")
-else:
-    print("\n  ✓ Справжніх розбіжностей не виявлено.")
+# Знаходимо колонку is_duplicate (якщо є)
+duplicate_col = None
+for col_idx, col_name in enumerate(result_df.columns, 1):
+    if 'is_duplicate' in str(col_name):
+        duplicate_col = col_idx
+        break
 
-# Створюємо файл з відсутніми записами у процентівці
-if missing_in_procentivka:
-    missing_in_procentivka_df = pd.DataFrame(missing_in_procentivka)
-    missing_in_procentivka_file = 'Відсутні_у_процентівці.xlsx'
-    print(f"\n  → Створюємо файл з відсутніми записами у процентівці: {missing_in_procentivka_file}")
-    print(f"    Кількість відсутніх записів у процентівці: {len(missing_in_procentivka)}")
-    missing_in_procentivka_df.to_excel(missing_in_procentivka_file, index=False)
-    print(f"✓ Файл збережено: {missing_in_procentivka_file}")
-else:
-    print("\n  ✓ Всі записи з відомості є у процентівці.")
+if duplicate_col:
+    for row_idx in range(2, ws.max_row + 1):
+        if ws.cell(row=row_idx, column=duplicate_col).value == True:
+            for col in range(1, ws.max_column + 1):
+                ws.cell(row=row_idx, column=col).fill = red_fill
+
+# Прибираємо технічну колонку
+if 'is_duplicate' in result_df.columns:
+    for row_idx in range(1, ws.max_row + 1):
+        ws.cell(row=row_idx, column=duplicate_col).value = None
+
+wb.save(output_file)
+print(f"✓ Файл збережено з червоним виділенням дублікатів: {output_file}")
+
+# --- Створення файлу з відсутніми ---
+if missing_in_vidomist:
+    missing_df = pd.DataFrame(missing_in_vidomist)
+    missing_file = 'Відсутні.xlsx'
+    print(f"\n  → Створюємо файл з відсутніми: {missing_file}")
+    print(f"    Кількість: {len(missing_in_vidomist)}")
+    missing_df.to_excel(missing_file, index=False)
+    print(f"✓ Файл збережено: {missing_file}")
 
 # --- Підсумки ---
 print("\n" + "=" * 60)
 print("РЕЗУЛЬТАТИ ОБРОБКИ")
 print("=" * 60)
-print(f"✓ Оброблено записів у відомості: {len(vidomist_updated)}")
-print(f"✓ Оновлено записів з процентівки: {updated_count}")
-print(f"✓ Додано дублікатів під записами: {added_duplicates_count}")
-print(f"✓ Додано відсутніх записів у відомість: {len(missing_records)}")
-print(f"✓ Відсутніх у процентівці: {len(missing_in_procentivka)}")
-print(f"✓ Справжніх розбіжностей даних: {len(real_mismatches)}")
+print(f"✓ Усього записів у результаті: {len(result_df)}")
+print(f"✓ Оновлено записів: {updated_count}")
+print(f"✓ Додано дублікатів (червоні): {duplicates_added}")
+print(f"✓ Відсутніх записів: {len(missing_in_vidomist)}")
 print("=" * 60)
 print("\n✅ Обробка завершена успішно!")

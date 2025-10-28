@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Excel files (оновлені файли)
+Відомість_оновлена*.xlsx
+Відомість_нові.xlsx
+
+# Original files (якщо треба зберегти оригінали)
+# Відомість.xlsm
+# Процентівка.xlsx
+
